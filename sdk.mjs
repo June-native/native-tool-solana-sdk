@@ -9,7 +9,8 @@
  *     immediately before the swap instruction (the program reads the signature
  *     from `current_instruction_index - 1` via the instructions sysvar);
  *   - replay protection is keyed by a `quote` PDA derived from `quote_id`
- *     (no per-MM nonce, no deadline);
+ *     (no per-MM nonce; the deadline is bound into the signed quote message
+ *     and enforced on-chain);
  *   - the trade_rfq_compact instruction carries 26 account metas, which fit a
  *     legacy transaction, so no Address Lookup Table is required.
  *
@@ -80,11 +81,12 @@ const RFQ_CONFIG_DISCRIMINATOR = [155, 12, 170, 224, 30, 250, 204, 130];
 
 // trade_rfq_compact instruction data layout (all little-endian):
 //   discriminator (8) + quote_id (16) + seller_amount (8) + buyer_amount (8)
-//   + seller_input_mode (1) = 41 bytes total.
+//   + deadline (4) + seller_input_mode (1) = 45 bytes total.
 const TRADE_RFQ_QUOTE_ID_OFFSET = 8;
 const TRADE_RFQ_SELLER_AMOUNT_OFFSET = 8 + 16;
 const TRADE_RFQ_BUYER_AMOUNT_OFFSET = 8 + 16 + 8;
-const TRADE_RFQ_SELLER_INPUT_MODE_OFFSET = 8 + 16 + 8 + 8;
+const TRADE_RFQ_DEADLINE_OFFSET = 8 + 16 + 8 + 8;
+const TRADE_RFQ_SELLER_INPUT_MODE_OFFSET = 8 + 16 + 8 + 8 + 4;
 
 // SellerInputMode enum values (mirror SellerInputMode in rfq/src/lib.rs).
 const SELLER_INPUT_MODE_TOKEN_ACCOUNT = 0;
@@ -189,6 +191,7 @@ function parseCompactCalldata(calldata) {
     ),
     sellerAmount: tradeRfqData.readBigUInt64LE(TRADE_RFQ_SELLER_AMOUNT_OFFSET),
     buyerAmount: tradeRfqData.readBigUInt64LE(TRADE_RFQ_BUYER_AMOUNT_OFFSET),
+    deadline: tradeRfqData.readUInt32LE(TRADE_RFQ_DEADLINE_OFFSET),
     sellerInputMode: tradeRfqData[TRADE_RFQ_SELLER_INPUT_MODE_OFFSET],
   };
 }
