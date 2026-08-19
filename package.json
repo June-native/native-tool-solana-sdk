@@ -1,0 +1,23 @@
+{
+  "name": "native-tool-solana-sdk",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Native Solana compact RFQ swap SDK: firm-quote response to on-chain transaction",
+  "main": "sdk.mjs",
+  "exports": "./sdk.mjs",
+  "files": [
+    "sdk.mjs"
+  ],
+  "keywords": [
+    "solana",
+    "swap",
+    "rfq",
+    "native"
+  ],
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "@solana/spl-token": "^0.4.9",
+    "@solana/web3.js": "^1.98.4"
+  }
+}
