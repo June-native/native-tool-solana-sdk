@@ -1,23 +1,28 @@
 {
-  "name": "native-tool-solana-sdk",
+  "name": "native-tool-solana-pamm-sdk",
   "version": "1.0.0",
   "type": "module",
-  "description": "Native Solana compact RFQ swap SDK: firm-quote response to on-chain transaction",
+  "description": "Native pAMM Solana swap SDK: quote_exact_in / swap_exact_in packaged and submitted on-chain",
   "main": "sdk.mjs",
   "exports": "./sdk.mjs",
   "files": [
     "sdk.mjs"
   ],
+  "scripts": {
+    "quote": "node example.mjs quote",
+    "swap": "node example.mjs swap"
+  },
   "keywords": [
     "solana",
+    "pamm",
     "swap",
-    "rfq",
     "native"
   ],
   "license": "UNLICENSED",
   "private": true,
   "dependencies": {
     "@solana/spl-token": "^0.4.9",
-    "@solana/web3.js": "^1.98.4"
+    "@solana/web3.js": "^1.98.4",
+    "bs58": "^6.0.0"
   }
 }
