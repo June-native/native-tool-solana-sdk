@@ -1,14 +1,12 @@
-// example.mjs: quote + swap via the pAMM Solana SDK, run like the Relay API
-// test script (all parameters come from environment variables):
+// example.mjs: quote + swap via the pAMM Solana SDK.
+// Parameters come from `.env` (see `.env.example`) or the process environment.
 //
-//   TAKER_PRIVATE_KEY="YOUR_PRIVATE_KEY_BASE58" NETWORK=devnet \
-//   TOKEN_IN="So11111111111111111111111111111111111111112" \
-//   TOKEN_OUT="ApUXPfRZ5N5yLEx5ncaNVANJvDfqE5R2QwdqDyPCZCSu" \
-//   AMOUNT="0.01" \
-//   node example.mjs   # always: quote first, then submit the swap
+//   node example.mjs          # quote then swap
+//   node example.mjs quote    # on-chain quote and local quote; exit if they differ
 //
 // pAMM has no HTTP API / API_KEY: quoting is an on-chain view call and the
 // swap is submitted directly, so API_KEY is intentionally absent.
+import { fileURLToPath } from "node:url";
 import bs58 from "bs58";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import {
@@ -17,18 +15,26 @@ import {
   applySlippage,
   executeSwapExactIn,
   quoteExactIn,
+  quoteExactInOffchain,
   signTransactionWithKeypair,
 } from "./sdk.mjs";
 
-// Devnet demo payer used when TAKER_PRIVATE_KEY is unset (replace for real
-// usage, mirroring the API_KEY placeholder convention of the Relay suite).
-const DEMO_TAKER_PRIVATE_KEY =
-  "2x7mpdmxymxFVjUWcEKfMpUuiK1qJJ9XhNed9UvJzQM5ZtLQ1XCRC67KwU98iTM3TaRbGWWLUB5jHHK9kc4vBWWA";
+try {
+  process.loadEnvFile(fileURLToPath(new URL("./.env", import.meta.url)));
+} catch (err) {
+  if (err.code !== "ENOENT") throw err;
+}
 
 const NETWORKS = {
   devnet: {
     rpc: "https://api.devnet.solana.com",
     cluster: "devnet",
+    pamm: DEFAULT_PAMM_PROGRAM_ID.toBase58(),
+    creditVault: DEFAULT_CREDIT_VAULT_PROGRAM_ID.toBase58(),
+  },
+  mainnet: {
+    rpc: "https://solana-rpc.publicnode.com",
+    cluster: "mainnet-beta",
     pamm: DEFAULT_PAMM_PROGRAM_ID.toBase58(),
     creditVault: DEFAULT_CREDIT_VAULT_PROGRAM_ID.toBase58(),
   },
@@ -52,21 +58,29 @@ if (!net.pamm || !net.creditVault) {
   process.exit(1);
 }
 
-const TAKER_PRIVATE_KEY = process.env.TAKER_PRIVATE_KEY ?? DEMO_TAKER_PRIVATE_KEY;
+const TAKER_PRIVATE_KEY = process.env.TAKER_PRIVATE_KEY?.trim();
 const TOKEN_IN = process.env.TOKEN_IN;
 const TOKEN_OUT = process.env.TOKEN_OUT;
 const AMOUNT = process.env.AMOUNT ?? "0.01";
 const SLIPPAGE_BPS = process.env.SLIPPAGE_BPS ?? "100";
 
+if (!TAKER_PRIVATE_KEY) {
+  console.error(
+    "TAKER_PRIVATE_KEY is missing. Paste a base58 secret key into .env (see .env.example).",
+  );
+  process.exit(1);
+}
 if (!TOKEN_IN || !TOKEN_OUT) {
   console.error("TOKEN_IN and TOKEN_OUT env vars are required (mint addresses)");
   process.exit(1);
 }
 
-const connection = new Connection(process.env.SOLANA_RPC_URL ?? net.rpc, "confirmed");
+const rpcUrl = process.env.SOLANA_RPC_URL?.trim() || net.rpc;
+const connection = new Connection(rpcUrl, "confirmed");
 const wallet = Keypair.fromSecretKey(bs58.decode(TAKER_PRIVATE_KEY));
 const options = {
   programIds: { pamm: net.pamm, creditVault: net.creditVault },
+  simulationPayer: wallet.publicKey,
   logger: console,
 };
 
@@ -103,6 +117,23 @@ async function main() {
     `quote: ${AMOUNT} in -> ${amountOut} raw out (${Number(amountOut) / 10 ** outDecimals})`,
   );
   if (MODE === "quote") {
+    const offchain = await quoteExactInOffchain({
+      connection,
+      sellerMint: TOKEN_IN,
+      buyerMint: TOKEN_OUT,
+      grossAmountIn,
+      options,
+    });
+    console.log(
+      `offchain: ${offchain.amountOut} raw out, fee ${offchain.feeAmount}, ` +
+        `slot ${offchain.currentSlot}/${offchain.validUntilSlot}, ` +
+        `buyer spendable ${offchain.buyerSpendableRaw}`,
+    );
+    if (offchain.amountOut !== amountOut) {
+      throw new Error(
+        `offchain quote ${offchain.amountOut} != on-chain quote ${amountOut}`,
+      );
+    }
     return;
   }
 
@@ -116,7 +147,13 @@ async function main() {
     minAmountOut: applySlippage(amountOut, Number(SLIPPAGE_BPS)), // from the fresh quote above
     options,
   });
-  console.log(`swap confirmed: https://explorer.solana.com/tx/${signature}?cluster=${net.cluster}`);
+  const clusterQs =
+    net.cluster === "mainnet-beta" || net.cluster === "mainnet"
+      ? ""
+      : `?cluster=${net.cluster}`;
+  console.log(
+    `swap confirmed: https://explorer.solana.com/tx/${signature}${clusterQs}`,
+  );
 }
 
 main()

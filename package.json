@@ -10,7 +10,8 @@
   ],
   "scripts": {
     "quote": "node example.mjs quote",
-    "swap": "node example.mjs swap"
+    "swap": "node example.mjs swap",
+    "test": "node --test quote-math.test.mjs"
   },
   "keywords": [
     "solana",

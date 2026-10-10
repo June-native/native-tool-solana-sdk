@@ -9,7 +9,9 @@
  * 7peHVBaaUoTikbuWKn8j2JtNz5dq6AXvQVkaLTgnKVME):
  *
  *   - `quote_exact_in` (read-only view, u64 gross_amount_in):
- *       simulates the instruction and decodes the u64 amount-out return data;
+ *       simulates the instruction and decodes the u64 amount-out return data.
+ *       `quoteExactInOffchain` / `simulateExactIn` replay the same Engine math
+ *       locally (programs/pamm/src/math.rs `simulate_exact_in`) for aggregators;
  *   - `swap_exact_in` (u64 gross_amount_in, u64 min_amount_out):
  *       17 accounts in strict IDL order; direction is decided by the
  *       seller/buyer mint accounts, never by the amount.
@@ -94,11 +96,34 @@ const SWAP_EXACT_IN_DISCRIMINATOR = [104, 104, 131, 86, 161, 189, 180, 216];
 //   swap_exact_in:  discriminator (8) + gross_amount_in (u64) + min_amount_out (u64)
 const U64_SIZE = 8;
 
-// Engine account data offsets (8-byte discriminator + fields in IDL order):
-//   base_mint(32) + quote_mint(32) + base_decimals(1) + quote_decimals(1)
-//   + fair_sqrt_price_x96(20) + fees(4+4) + valid_until_slot(8) + ...
-const ENGINE_VALID_UNTIL_SLOT_OFFSET = 8 + 32 + 32 + 1 + 1 + 20 + 4 + 4;
+// Engine account (Anchor, little-endian). Engine::LEN is 2071 bytes, including
+// room for 40 ranges. A shorter initialized vec is followed by zero padding.
+export const ENGINE_ACCOUNT_DISCRIMINATOR = Buffer.from([
+  246, 94, 41, 147, 231, 121, 110, 19,
+]);
+export const ENGINE_ACCOUNT_SIZE = 2071;
+const ENGINE_BASE_MINT_OFFSET = 8;
+const ENGINE_QUOTE_MINT_OFFSET = 40;
+const ENGINE_BASE_DECIMALS_OFFSET = 72;
+const ENGINE_QUOTE_DECIMALS_OFFSET = 73;
+const ENGINE_FAIR_SQRT_PRICE_OFFSET = 74;
+const ENGINE_FAIR_SQRT_PRICE_SIZE = 20;
+const ENGINE_BASE_TO_QUOTE_FEE_OFFSET = 94;
+const ENGINE_QUOTE_TO_BASE_FEE_OFFSET = 98;
+const ENGINE_VALID_UNTIL_SLOT_OFFSET = 102;
 const ENGINE_VALID_UNTIL_SLOT_SIZE = 8;
+const ENGINE_CURSOR_OFFSET = 110;
+const ENGINE_TICK_SPACING_OFFSET = 126;
+const ENGINE_MIN_BASE_INPUT_OFFSET = 130;
+const ENGINE_MIN_QUOTE_INPUT_OFFSET = 138;
+const ENGINE_RANGES_OFFSET = 146;
+const RANGE_SIZE = 48;
+const MAX_RANGES = 40;
+// pAMM Config: 8-byte discriminator + 4 pubkeys, then `paused`.
+const CONFIG_PAUSED_OFFSET = 136;
+// CreditVault Market: 8 + 5 pubkeys + accounting/shares/inventory/reserve, then pending.
+const MARKET_PENDING_REDEEM_OFFSET = 200;
+const TOKEN_AMOUNT_OFFSET = 64;
 
 // Base-fee headroom for one swap transaction (legacy tx base fee is 5,000
 // lamports; headroom covers signature-verify costs of the extra prepare
@@ -344,6 +369,519 @@ async function readTokenBalance(connection, account) {
   }
   // SPL token account layout: mint(32) + owner(32) + amount(8).
   return info.data.readBigUInt64LE(64);
+}
+
+// ---------------------------------------------------------------------------
+// Off-chain quote (port of programs/pamm/src/math.rs)
+//
+// Relative ticks are 1.000001^tick, not Uniswap V3's 1.0001. Cursor and range
+// bounds are relative sqrt prices; fair_sqrt_price_x96 is the human
+// quote-per-base sqrt price in Q96. All curve math is integer. Do not use
+// JavaScript Number for prices or amounts.
+// ---------------------------------------------------------------------------
+
+const U64_MAX = (1n << 64n) - 1n;
+const U128_MAX = (1n << 128n) - 1n;
+const U256_MAX = (1n << 256n) - 1n;
+const Q96 = 1n << 96n;
+const PPM = 1_000_000n;
+
+// Precomputed (1.000001^(2^k)).sqrt() in Q128, copied from math.rs.
+const TICK_POWERS_X128 = [
+  [16962059538608879372n, 9223369731012n, 1n, 0n],
+  [10175519178963368023n, 18446744073709n, 1n, 0n],
+  [3263995518665420733n, 36893506594163n, 1n, 0n],
+  [8037542486737741887n, 73787086975376n, 1n, 0n],
+  [9145062769327673369n, 147574469099543n, 1n, 0n],
+  [16256315444163425208n, 295150118798971n, 1n, 0n],
+  [13385028197968547279n, 590304960035262n, 1n, 0n],
+  [14162048803802204085n, 1180628810122040n, 1n, 0n],
+  [4016529007607859005n, 2361333182868126n, 1n, 0n],
+  [14640238321298640960n, 4722968635577381n, 1n, 0n],
+  [9336787995755789771n, 9447146505296220n, 1n, 0n],
+  [1788163712335479669n, 18899131185651189n, 1n, 0n],
+  [17942857042391559428n, 37817624983920910n, 1n, 0n],
+  [7207176732313920979n, 75712779788481702n, 1n, 0n],
+  [12514007322757910661n, 151736314960156963n, 1n, 0n],
+  [7400209130047855181n, 304720758543212849n, 1n, 0n],
+  [53144219661291235n, 614475182665355064n, 1n, 0n],
+  [5491318309218184240n, 1249419004598587822n, 1n, 0n],
+  [12988073895863456620n, 2583462582661982585n, 1n, 0n],
+  [8581698081579506360n, 5528738550349822245n, 1n, 0n],
+  [14579730345287284071n, 12714514778242345237n, 1n, 0n],
+  [16114512675554761541n, 15745831255415880446n, 2n, 0n],
+  [3237489052423528035n, 2636726114474184463n, 8n, 0n],
+].map(([a, b, c, d]) => a + (b << 64n) + (c << 128n) + (d << 192n));
+
+function pammFail(code) {
+  const error = new Error(code);
+  error.code = code;
+  throw error;
+}
+
+function assertU256(value) {
+  if (value < 0n || value > U256_MAX) pammFail("MathOverflow");
+  return value;
+}
+
+function bitLength(value) {
+  if (value === 0n) return 0;
+  return value.toString(2).length;
+}
+
+function readU128LE(buffer, offset) {
+  const lo = buffer.readBigUInt64LE(offset);
+  const hi = buffer.readBigUInt64LE(offset + 8);
+  return lo + (hi << 64n);
+}
+
+function readUnsignedLE(buffer, offset, size) {
+  let value = 0n;
+  for (let i = 0; i < size; i++) {
+    value += BigInt(buffer[offset + i]) << (8n * BigInt(i));
+  }
+  return value;
+}
+
+function minBig(a, b) {
+  return a < b ? a : b;
+}
+
+function maxBig(a, b) {
+  return a > b ? a : b;
+}
+
+function mulDivDown(a, b, d) {
+  if (d === 0n) pammFail("MathOverflow");
+  return assertU256((a * b) / d);
+}
+
+function mulDivUp(a, b, d) {
+  if (d === 0n) pammFail("MathOverflow");
+  const product = a * b;
+  const quotient = product / d;
+  return assertU256(product % d === 0n ? quotient : quotient + 1n);
+}
+
+function mulShift128Down(a, b) {
+  return assertU256((a * b) >> 128n);
+}
+
+function mulShift96Down(a, b) {
+  return assertU256((a * b) >> 96n);
+}
+
+function mulShift96Up(a, b) {
+  const product = a * b;
+  const mask = Q96 - 1n;
+  return assertU256((product >> 96n) + ((product & mask) === 0n ? 0n : 1n));
+}
+
+function divUp(n, d) {
+  if (d === 0n) pammFail("MathOverflow");
+  return assertU256(n / d + (n % d === 0n ? 0n : 1n));
+}
+
+function checkedAdd(a, b) {
+  return assertU256(a + b);
+}
+
+function pow10(decimals) {
+  let value = 1n;
+  for (let i = 0; i < decimals; i++) {
+    value *= 10n;
+    if (value > U256_MAX) pammFail("MathOverflow");
+  }
+  return value;
+}
+
+function toX18(raw, decimals) {
+  if (decimals <= 18) {
+    return assertU256(BigInt(raw) * pow10(18 - decimals));
+  }
+  return BigInt(raw) / pow10(decimals - 18);
+}
+
+function fromX18(value, decimals) {
+  const raw =
+    decimals <= 18
+      ? value / pow10(18 - decimals)
+      : assertU256(value * pow10(decimals - 18));
+  if (raw > U64_MAX) pammFail("MathOverflow");
+  return raw;
+}
+
+/**
+ * Relative sqrt price at `tick`, Q96. Tick 0 is 2^96. Base is 1.000001.
+ *
+ * @param {number} tick
+ * @returns {bigint}
+ */
+export function sqrtRatioAtTick(tick) {
+  if (!Number.isInteger(tick)) pammFail("MathOverflow");
+  let r = 1n << 128n;
+  let n = tick < 0 ? BigInt(-tick) : BigInt(tick);
+  let bit = 0;
+  while (n !== 0n) {
+    if ((n & 1n) === 1n) {
+      if (bit >= TICK_POWERS_X128.length) pammFail("MathOverflow");
+      r = mulShift128Down(r, TICK_POWERS_X128[bit]);
+    }
+    n >>= 1n;
+    bit += 1;
+  }
+  if (tick < 0) {
+    if (r === 0n) pammFail("MathOverflow");
+    r = U256_MAX / r;
+  }
+  const shifted = divUp(r, 1n << 32n);
+  if (shifted > U128_MAX) pammFail("MathOverflow");
+  return shifted;
+}
+
+function fairOf(engine) {
+  if (engine.fairSqrtPriceX96 === 0n) pammFail("MathOverflow");
+  return engine.fairSqrtPriceX96;
+}
+
+function absoluteSqrt(relative, fair) {
+  return mulShift96Down(fair, relative);
+}
+
+function relativeSqrt(abs, fair, up) {
+  const value = up ? mulDivUp(abs, Q96, fair) : mulDivDown(abs, Q96, fair);
+  if (value > U128_MAX) pammFail("MathOverflow");
+  return value;
+}
+
+function rangeLiquidity(range, engine, fair) {
+  const c = toX18(range.capacityBaseRaw, engine.baseDecimals);
+  const a = absoluteSqrt(range.startSqrtRatioX96, fair);
+  const b = absoluteSqrt(range.endSqrtRatioX96, fair);
+  if (!(b > a) || c === 0n) pammFail("MathOverflow");
+  const i = mulShift96Down(a, b);
+  const l = mulDivDown(c, i, b - a);
+  if (l === 0n || bitLength(l) > 160) pammFail("MathOverflow");
+  return l;
+}
+
+function amount0(a, b, l, up) {
+  if (!(b >= a) || a === 0n || bitLength(l) > 160) pammFail("MathOverflow");
+  const n = assertU256(l << 96n);
+  if (up) return divUp(mulDivUp(n, b - a, b), a);
+  return mulDivDown(n, b - a, b) / a;
+}
+
+function amount1(a, b, l, up) {
+  if (b < a) pammFail("MathOverflow");
+  return up ? mulShift96Up(l, b - a) : mulShift96Down(l, b - a);
+}
+
+function nextBaseIn(s, l, x) {
+  if (s === 0n) pammFail("MathOverflow");
+  const n = assertU256(l << 96n);
+  const xs = x * s;
+  if (xs <= U256_MAX) {
+    const denominator = n + xs;
+    if (denominator <= U256_MAX) return mulDivUp(n, s, denominator);
+  }
+  return divUp(n, checkedAdd(n / s, x));
+}
+
+function nextQuoteIn(s, l, y) {
+  if (l === 0n) pammFail("MathOverflow");
+  return checkedAdd(s, mulDivDown(y, Q96, l));
+}
+
+/**
+ * Decode an Engine account into the fields `simulateExactIn` consumes.
+ * Accepts a Buffer or Uint8Array of the raw account data, including the
+ * 8-byte Anchor discriminator.
+ *
+ * @param {Buffer|Uint8Array} data
+ */
+export function decodeEngineAccount(data) {
+  const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  if (
+    buffer.length < ENGINE_RANGES_OFFSET + 4 ||
+    !buffer.subarray(0, 8).equals(ENGINE_ACCOUNT_DISCRIMINATOR)
+  ) {
+    throw new Error(
+      `not a pAMM Engine account (${buffer.length} bytes, discriminator mismatch or truncated)`,
+    );
+  }
+  const rangeCount = buffer.readUInt32LE(ENGINE_RANGES_OFFSET);
+  if (rangeCount > MAX_RANGES) {
+    throw new Error(`engine range count ${rangeCount} exceeds ${MAX_RANGES}`);
+  }
+  const rangesEnd = ENGINE_RANGES_OFFSET + 4 + rangeCount * RANGE_SIZE;
+  if (buffer.length < rangesEnd) {
+    throw new Error(`engine account truncated: need ${rangesEnd} bytes, got ${buffer.length}`);
+  }
+  const ranges = [];
+  for (let i = 0; i < rangeCount; i++) {
+    const offset = ENGINE_RANGES_OFFSET + 4 + i * RANGE_SIZE;
+    ranges.push({
+      startTick: buffer.readInt32LE(offset),
+      endTick: buffer.readInt32LE(offset + 4),
+      capacityBaseRaw: buffer.readBigUInt64LE(offset + 8),
+      startSqrtRatioX96: readU128LE(buffer, offset + 16),
+      endSqrtRatioX96: readU128LE(buffer, offset + 32),
+    });
+  }
+  return {
+    baseMint: new PublicKey(buffer.subarray(ENGINE_BASE_MINT_OFFSET, ENGINE_BASE_MINT_OFFSET + 32)),
+    quoteMint: new PublicKey(buffer.subarray(ENGINE_QUOTE_MINT_OFFSET, ENGINE_QUOTE_MINT_OFFSET + 32)),
+    baseDecimals: buffer[ENGINE_BASE_DECIMALS_OFFSET],
+    quoteDecimals: buffer[ENGINE_QUOTE_DECIMALS_OFFSET],
+    fairSqrtPriceX96: readUnsignedLE(
+      buffer,
+      ENGINE_FAIR_SQRT_PRICE_OFFSET,
+      ENGINE_FAIR_SQRT_PRICE_SIZE,
+    ),
+    baseToQuoteFeePpm: buffer.readUInt32LE(ENGINE_BASE_TO_QUOTE_FEE_OFFSET),
+    quoteToBaseFeePpm: buffer.readUInt32LE(ENGINE_QUOTE_TO_BASE_FEE_OFFSET),
+    validUntilSlot: buffer.readBigUInt64LE(ENGINE_VALID_UNTIL_SLOT_OFFSET),
+    cursorSqrtRatioX96: readU128LE(buffer, ENGINE_CURSOR_OFFSET),
+    tickSpacing: buffer.readUInt32LE(ENGINE_TICK_SPACING_OFFSET),
+    minBaseInputRaw: buffer.readBigUInt64LE(ENGINE_MIN_BASE_INPUT_OFFSET),
+    minQuoteInputRaw: buffer.readBigUInt64LE(ENGINE_MIN_QUOTE_INPUT_OFFSET),
+    ranges,
+  };
+}
+
+/**
+ * Local `simulate_exact_in`. Same inputs and rounding as the on-chain quote.
+ * Does not check protocol pause or vault custody; those are separate.
+ *
+ * @param {Object} params
+ * @param {ReturnType<typeof decodeEngineAccount>} params.engine
+ * @param {string|PublicKey} params.sellerMint
+ * @param {string|PublicKey} params.buyerMint
+ * @param {bigint|number|string} params.grossAmountIn
+ * @param {bigint|number|string} params.currentSlot
+ * @returns {{amountOut: bigint, feeAmount: bigint, endCursorSqrtRatioX96: bigint}}
+ */
+export function simulateExactIn({
+  engine,
+  sellerMint,
+  buyerMint,
+  grossAmountIn,
+  currentSlot,
+}) {
+  const gross = BigInt(grossAmountIn);
+  if (gross === 0n) pammFail("ZeroAmount");
+  if (gross < 0n || gross > U64_MAX) {
+    throw new Error(`grossAmountIn out of u64 range: ${grossAmountIn}`);
+  }
+  const slot = BigInt(currentSlot);
+  if (slot < 0n || slot > U64_MAX) {
+    throw new Error(`currentSlot out of u64 range: ${currentSlot}`);
+  }
+  if (slot > engine.validUntilSlot) pammFail("PriceExpired");
+  if (engine.ranges.length === 0 || engine.tickSpacing === 0) {
+    pammFail("InsufficientDepth");
+  }
+
+  const seller = toPublicKey(sellerMint, "sellerMint");
+  const buyer = toPublicKey(buyerMint, "buyerMint");
+  let direction;
+  let feePpm;
+  let inputDecimals;
+  let outputDecimals;
+  let minimum;
+  if (seller.equals(engine.baseMint) && buyer.equals(engine.quoteMint)) {
+    direction = "baseToQuote";
+    feePpm = engine.baseToQuoteFeePpm;
+    inputDecimals = engine.baseDecimals;
+    outputDecimals = engine.quoteDecimals;
+    minimum = engine.minBaseInputRaw;
+  } else if (seller.equals(engine.quoteMint) && buyer.equals(engine.baseMint)) {
+    direction = "quoteToBase";
+    feePpm = engine.quoteToBaseFeePpm;
+    inputDecimals = engine.quoteDecimals;
+    outputDecimals = engine.baseDecimals;
+    minimum = engine.minQuoteInputRaw;
+  } else {
+    pammFail("InvalidPair");
+  }
+  if (gross < minimum) pammFail("AmountTooSmall");
+  if (BigInt(feePpm) > PPM) pammFail("MathOverflow");
+  const netRaw = (gross * (PPM - BigInt(feePpm))) / PPM;
+  const feeAmount = gross - netRaw;
+  let remaining = toX18(netRaw, inputDecimals);
+  if (remaining === 0n) pammFail("AmountTooSmall");
+
+  const fair = fairOf(engine);
+  const cursor = engine.cursorSqrtRatioX96;
+  let output = 0n;
+  let lastRawOut = 0n;
+  let persistedCursor = cursor;
+  let index;
+  let currentRel;
+  if (direction === "baseToQuote") {
+    index = -1;
+    for (let i = engine.ranges.length - 1; i >= 0; i--) {
+      if (engine.ranges[i].startSqrtRatioX96 < cursor) {
+        index = i;
+        break;
+      }
+    }
+    if (index < 0) pammFail("InsufficientDepth");
+    currentRel = minBig(cursor, engine.ranges[index].endSqrtRatioX96);
+  } else {
+    index = engine.ranges.findIndex((range) => range.endSqrtRatioX96 > cursor);
+    if (index < 0) pammFail("InsufficientDepth");
+    currentRel = maxBig(cursor, engine.ranges[index].startSqrtRatioX96);
+  }
+
+  for (let steps = 0; steps <= engine.ranges.length; steps++) {
+    const range = engine.ranges[index];
+    const l = rangeLiquidity(range, engine, fair);
+    const currentAbs = absoluteSqrt(currentRel, fair);
+    let consumed;
+    let out;
+    let nextRel;
+    if (direction === "baseToQuote") {
+      const boundary = absoluteSqrt(range.startSqrtRatioX96, fair);
+      const required = amount0(boundary, currentAbs, l, true);
+      if (remaining >= required) {
+        consumed = required;
+        out = amount1(boundary, currentAbs, l, false);
+        nextRel = range.startSqrtRatioX96;
+      } else {
+        const next = maxBig(nextBaseIn(currentAbs, l, remaining), boundary);
+        consumed = remaining;
+        out = amount1(next, currentAbs, l, false);
+        nextRel = maxBig(relativeSqrt(next, fair, true), range.startSqrtRatioX96);
+      }
+    } else {
+      const boundary = absoluteSqrt(range.endSqrtRatioX96, fair);
+      const required = amount1(currentAbs, boundary, l, true);
+      if (remaining >= required) {
+        consumed = required;
+        out = amount0(currentAbs, boundary, l, false);
+        nextRel = range.endSqrtRatioX96;
+      } else {
+        const next = minBig(nextQuoteIn(currentAbs, l, remaining), boundary);
+        consumed = remaining;
+        out = amount0(currentAbs, next, l, false);
+        nextRel = minBig(relativeSqrt(next, fair, false), range.endSqrtRatioX96);
+      }
+    }
+    if (consumed > remaining) pammFail("MathOverflow");
+    remaining -= consumed;
+    output = checkedAdd(output, out);
+    const candidate = fromX18(output, outputDecimals);
+    if (candidate > lastRawOut) {
+      lastRawOut = candidate;
+      persistedCursor = nextRel;
+    }
+    if (remaining === 0n) break;
+    if (direction === "baseToQuote") {
+      if (index === 0) pammFail("InsufficientDepth");
+      index -= 1;
+      currentRel = engine.ranges[index].endSqrtRatioX96;
+    } else {
+      index += 1;
+      if (index === engine.ranges.length) pammFail("InsufficientDepth");
+      currentRel = engine.ranges[index].startSqrtRatioX96;
+    }
+  }
+  if (remaining !== 0n) pammFail("InsufficientDepth");
+  if (lastRawOut === 0n) pammFail("ZeroAmountOut");
+  return {
+    amountOut: lastRawOut,
+    feeAmount,
+    endCursorSqrtRatioX96: persistedCursor,
+  };
+}
+
+function buyerSpendableRaw(custodyInfo, marketInfo) {
+  if (!marketInfo || marketInfo.data.length < MARKET_PENDING_REDEEM_OFFSET + 8) {
+    return null;
+  }
+  const pending = marketInfo.data.readBigUInt64LE(MARKET_PENDING_REDEEM_OFFSET);
+  const custody =
+    custodyInfo && custodyInfo.data.length >= TOKEN_AMOUNT_OFFSET + 8
+      ? custodyInfo.data.readBigUInt64LE(TOKEN_AMOUNT_OFFSET)
+      : 0n;
+  return custody > pending ? custody - pending : 0n;
+}
+
+/**
+ * Quote by reading the Engine account and running `simulateExactIn` locally.
+ * No `simulateTransaction`. The numeric `amountOut` matches `quoteExactIn`
+ * for the same Engine bytes and slot.
+ *
+ * `buyerSpendableRaw` is custody balance minus pending redeems. The curve
+ * quote does not consult it; a larger `amountOut` can still revert inside
+ * CreditVault.
+ *
+ * @returns {Promise<{
+ *   amountOut: bigint,
+ *   feeAmount: bigint,
+ *   endCursorSqrtRatioX96: bigint,
+ *   validUntilSlot: bigint,
+ *   currentSlot: bigint,
+ *   engine: PublicKey,
+ *   buyerSpendableRaw: bigint|null,
+ * }>}
+ */
+export async function quoteExactInOffchain({
+  connection,
+  sellerMint,
+  buyerMint,
+  grossAmountIn,
+  options = {},
+}) {
+  if (!connection) throw new Error("connection is required");
+  const amount = toBigInt(grossAmountIn, "grossAmountIn");
+  const seller = toPublicKey(sellerMint, "sellerMint");
+  const buyer = toPublicKey(buyerMint, "buyerMint");
+  const accounts = derivePammAccounts({
+    takerPublicKey: Keypair.generate().publicKey,
+    sellerMint: seller,
+    buyerMint: buyer,
+    programIds: options.programIds,
+  });
+  const resolvedEngine = await resolveEngine(
+    connection,
+    seller,
+    buyer,
+    options.pair,
+    accounts.pammProgramId,
+  );
+  const slotCommitment = options.slotCommitment ?? "processed";
+  const [engineInfo, configInfo, custodyInfo, marketInfo, slot] = await Promise.all([
+    connection.getAccountInfo(resolvedEngine.engine),
+    connection.getAccountInfo(accounts.pammConfig),
+    connection.getAccountInfo(accounts.buyerCustody),
+    connection.getAccountInfo(accounts.buyerMarket),
+    connection.getSlot(slotCommitment),
+  ]);
+  if (!configInfo || configInfo.data.length <= CONFIG_PAUSED_OFFSET) {
+    throw new Error(`pAMM config account missing: ${accounts.pammConfig.toBase58()}`);
+  }
+  if (configInfo.data[CONFIG_PAUSED_OFFSET] !== 0) pammFail("Paused");
+  if (!engineInfo) {
+    throw new Error(`engine account not found: ${resolvedEngine.engine.toBase58()}`);
+  }
+  const engine = decodeEngineAccount(engineInfo.data);
+  const quoted = simulateExactIn({
+    engine,
+    sellerMint: seller,
+    buyerMint: buyer,
+    grossAmountIn: amount,
+    currentSlot: slot,
+  });
+  return {
+    ...quoted,
+    validUntilSlot: engine.validUntilSlot,
+    currentSlot: BigInt(slot),
+    engine: resolvedEngine.engine,
+    buyerSpendableRaw: buyerSpendableRaw(custodyInfo, marketInfo),
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -55,6 +55,45 @@ const signature = await executeSwapExactIn({
 console.log(`https://explorer.solana.com/tx/${signature}?cluster=devnet`);
 ```
 
+Aggregators that already hold Engine account bytes can skip the simulation RPC
+and replay the same curve locally. `amountOut` matches `quoteExactIn` for the
+same account and slot. Pass that number through `applySlippage` and send it as
+`minAmountOut`; the swap still re-prices on-chain.
+
+```javascript
+import {
+  applySlippage,
+  decodeEngineAccount,
+  quoteExactInOffchain,
+  simulateExactIn,
+} from "./sdk.mjs";
+
+// One RPC read of the Engine, then local integer math. No simulateTransaction.
+const offchain = await quoteExactInOffchain({
+  connection,
+  sellerMint: WSOL,
+  buyerMint: QUOTE,
+  grossAmountIn: 10_000_000n,
+});
+
+// Or, from a Geyser / websocket account update you already have:
+const engine = decodeEngineAccount(accountInfo.data);
+const slot = await connection.getSlot("processed");
+const local = simulateExactIn({
+  engine,
+  sellerMint: WSOL,
+  buyerMint: QUOTE,
+  grossAmountIn: 10_000_000n,
+  currentSlot: slot,
+});
+
+const minAmountOut = applySlippage(local.amountOut, 100);
+```
+
+`quoteExactInOffchain` also returns `buyerSpendableRaw` (buyer custody minus
+pending redeems). The curve does not look at that balance. If `amountOut` is
+larger, CreditVault can still reject the swap.
+
 Or via the demo CLI, run exactly like the Relay API test script
 (`test-api-trade.mjs`) — all parameters via environment variables:
 
@@ -66,6 +105,7 @@ TAKER_PRIVATE_KEY="YOUR_PRIVATE_KEY_BASE58" NETWORK=devnet \
   TOKEN_OUT="ApUXPfRZ5N5yLEx5ncaNVANJvDfqE5R2QwdqDyPCZCSu" \
   AMOUNT="0.01" \
   node example.mjs   # always: quote first, then submit the swap
+  # node example.mjs quote  # on-chain quote and local quote; exits if they differ
 ```
 
 `AMOUNT` is in human token units (decimals are read from the on-chain mints).
@@ -160,6 +200,8 @@ the simulate gate or the RPC preflight cost nothing.
 
 - `DEFAULT_PAMM_PROGRAM_ID` / `DEFAULT_CREDIT_VAULT_PROGRAM_ID` / `WSOL_MINT` — devnet defaults
 - `quoteExactIn` — simulate `quote_exact_in`, return raw amount out
+- `quoteExactInOffchain` — same quote from a local replay of the Engine account
+- `simulateExactIn` / `decodeEngineAccount` / `sqrtRatioAtTick` — the curve itself, for a cached Engine
 - `buildSwapExactInTransaction` — build a ready-to-sign swap transaction
 - `executeSwapExactIn` — build, sign, send and confirm
 - `applySlippage` — `floor(quoted * (10_000 - bps) / 10_000)`
