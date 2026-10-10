@@ -68,7 +68,7 @@ import {
   simulateExactIn,
 } from "./sdk.mjs";
 
-// One RPC read of the Engine, then local integer math. No simulateTransaction.
+// One getMultipleAccounts read, then local integer math. No simulateTransaction.
 const offchain = await quoteExactInOffchain({
   connection,
   sellerMint: WSOL,
@@ -76,23 +76,29 @@ const offchain = await quoteExactInOffchain({
   grossAmountIn: 10_000_000n,
 });
 
-// Or, from a Geyser / websocket account update you already have:
+// Or, from an account update you already have (Geyser / websocket), using
+// the slot that update was observed at:
 const engine = decodeEngineAccount(accountInfo.data);
-const slot = await connection.getSlot("processed");
 const local = simulateExactIn({
   engine,
   sellerMint: WSOL,
   buyerMint: QUOTE,
   grossAmountIn: 10_000_000n,
-  currentSlot: slot,
+  currentSlot: context.slot,
 });
 
 const minAmountOut = applySlippage(local.amountOut, 100);
 ```
 
+Pair the Engine bytes with the slot they were read at. A slot taken from a
+different read can run ahead of the bytes and report a false `PriceExpired`.
+Before routing, also check that `validUntilSlot` leaves room for the swap to
+land.
+
 `quoteExactInOffchain` also returns `buyerSpendableRaw` (buyer custody minus
 pending redeems). The curve does not look at that balance. If `amountOut` is
-larger, CreditVault can still reject the swap.
+larger, CreditVault can still reject the swap. The swap also fails when the
+CreditVault config is paused.
 
 Or via the demo CLI, run exactly like the Relay API test script
 (`test-api-trade.mjs`) — all parameters via environment variables:

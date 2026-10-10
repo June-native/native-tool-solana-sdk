@@ -105,31 +105,30 @@ async function main() {
     BigInt(intPart || "0") * 10n ** BigInt(inDecimals) +
     BigInt(fracPart.padEnd(inDecimals, "0") || "0");
 
-  const amountOut = await quoteExactIn({
+  const quoteParams = {
     connection,
     sellerMint: TOKEN_IN,
     buyerMint: TOKEN_OUT,
     grossAmountIn,
     options,
-  });
+  };
+  const offchainBefore = MODE === "quote" ? await quoteExactInOffchain(quoteParams) : null;
+  const amountOut = await quoteExactIn(quoteParams);
   const outDecimals = await mintDecimals(TOKEN_OUT);
   console.log(
     `quote: ${AMOUNT} in -> ${amountOut} raw out (${Number(amountOut) / 10 ** outDecimals})`,
   );
   if (MODE === "quote") {
-    const offchain = await quoteExactInOffchain({
-      connection,
-      sellerMint: TOKEN_IN,
-      buyerMint: TOKEN_OUT,
-      grossAmountIn,
-      options,
-    });
+    const offchain = await quoteExactInOffchain(quoteParams);
     console.log(
       `offchain: ${offchain.amountOut} raw out, fee ${offchain.feeAmount}, ` +
         `slot ${offchain.currentSlot}/${offchain.validUntilSlot}, ` +
         `buyer spendable ${offchain.buyerSpendableRaw}`,
     );
-    if (offchain.amountOut !== amountOut) {
+    // An updater or another swap between the reads legitimately changes the quote.
+    if (offchainBefore.amountOut !== offchain.amountOut) {
+      console.log("engine moved during the comparison; rerun to compare");
+    } else if (offchain.amountOut !== amountOut) {
       throw new Error(
         `offchain quote ${offchain.amountOut} != on-chain quote ${amountOut}`,
       );

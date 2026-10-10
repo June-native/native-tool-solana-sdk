@@ -166,6 +166,56 @@ test("decoded Engine bytes quote the same as the in-memory engine", () => {
   assert.equal(decoded.validUntilSlot, 100n);
 });
 
+test("a cursor in a gap uses the nearest range in the trade direction", () => {
+  const engine = engineWithDecimals(6, 6);
+  const range = (startTick, endTick) => ({
+    startTick,
+    endTick,
+    capacityBaseRaw: 1_000_000_000n,
+    startSqrtRatioX96: sqrtRatioAtTick(startTick),
+    endSqrtRatioX96: sqrtRatioAtTick(endTick),
+  });
+  engine.ranges = [range(-20_000, -10_000), range(10_000, 20_000)];
+  const sellBase = simulateExactIn({
+    engine,
+    sellerMint: engine.baseMint,
+    buyerMint: engine.quoteMint,
+    grossAmountIn: 1_000_000n,
+    currentSlot: 100n,
+  });
+  assert.ok(sellBase.endCursorSqrtRatioX96 < sqrtRatioAtTick(-10_000));
+  const sellQuote = simulateExactIn({
+    engine,
+    sellerMint: engine.quoteMint,
+    buyerMint: engine.baseMint,
+    grossAmountIn: 1_000_000n,
+    currentSlot: 100n,
+  });
+  assert.ok(sellQuote.endCursorSqrtRatioX96 > sqrtRatioAtTick(10_000));
+});
+
+test("input beyond every range fails instead of partially filling", () => {
+  const engine = engineWithDecimals(6, 6);
+  engine.ranges[0].capacityBaseRaw = 1_000_000n;
+  assert.throws(
+    () =>
+      simulateExactIn({
+        engine,
+        sellerMint: engine.baseMint,
+        buyerMint: engine.quoteMint,
+        grossAmountIn: 10_000_000n,
+        currentSlot: 100n,
+      }),
+    (error) => error.code === "InsufficientDepth",
+  );
+});
+
+test("decodeEngineAccount rejects a non-Engine account", () => {
+  const data = encodeEngine(engineWithDecimals(6, 6));
+  data[0] ^= 1;
+  assert.throws(() => decodeEngineAccount(data), /not a pAMM Engine account/);
+});
+
 test("amount sweep keeps fee and cursor direction", () => {
   const engine = engineWithDecimals(6, 6);
   engine.ranges[0].capacityBaseRaw = 1_000_000_000n;

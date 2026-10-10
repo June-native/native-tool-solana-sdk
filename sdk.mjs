@@ -814,10 +814,24 @@ function buyerSpendableRaw(custodyInfo, marketInfo) {
  * No `simulateTransaction`. The numeric `amountOut` matches `quoteExactIn`
  * for the same Engine bytes and slot.
  *
+ * Engine, config, custody and market are read in one `getMultipleAccounts`
+ * call, and `currentSlot` is that response's context slot. Mixing account
+ * bytes from one commitment with a slot from another can report a false
+ * PriceExpired.
+ *
  * `buyerSpendableRaw` is custody balance minus pending redeems. The curve
  * quote does not consult it; a larger `amountOut` can still revert inside
  * CreditVault.
  *
+ * @param {Object} params
+ * @param {Connection} params.connection
+ * @param {string|PublicKey} params.sellerMint
+ * @param {string|PublicKey} params.buyerMint
+ * @param {bigint|number|string} params.grossAmountIn
+ * @param {Object} [params.options]
+ * @param {string} [params.options.commitment] defaults to the connection's commitment
+ * @param {Object} [params.options.programIds] { pamm, creditVault } overrides
+ * @param {{baseMint: string, quoteMint: string}} [params.options.pair] explicit engine pair order
  * @returns {Promise<{
  *   amountOut: bigint,
  *   feeAmount: bigint,
@@ -845,41 +859,54 @@ export async function quoteExactInOffchain({
     buyerMint: buyer,
     programIds: options.programIds,
   });
-  const resolvedEngine = await resolveEngine(
-    connection,
-    seller,
-    buyer,
-    options.pair,
-    accounts.pammProgramId,
+  const candidates = options.pair
+    ? [
+        (await resolveEngine(connection, seller, buyer, options.pair, accounts.pammProgramId))
+          .engine,
+      ]
+    : [
+        enginePda(seller, buyer, accounts.pammProgramId),
+        enginePda(buyer, seller, accounts.pammProgramId),
+      ];
+  const { context, value } = await connection.getMultipleAccountsInfoAndContext(
+    [accounts.pammConfig, accounts.buyerCustody, accounts.buyerMarket, ...candidates],
+    options.commitment ? { commitment: options.commitment } : undefined,
   );
-  const slotCommitment = options.slotCommitment ?? "processed";
-  const [engineInfo, configInfo, custodyInfo, marketInfo, slot] = await Promise.all([
-    connection.getAccountInfo(resolvedEngine.engine),
-    connection.getAccountInfo(accounts.pammConfig),
-    connection.getAccountInfo(accounts.buyerCustody),
-    connection.getAccountInfo(accounts.buyerMarket),
-    connection.getSlot(slotCommitment),
-  ]);
+  const [configInfo, custodyInfo, marketInfo, ...engineInfos] = value;
+
+  const found = candidates
+    .map((engine, i) => ({ engine, info: engineInfos[i] }))
+    .filter(({ info }) => info);
+  if (found.length === 0) {
+    throw new Error(
+      `no engine found for mints ${seller.toBase58()} / ${buyer.toBase58()}; ` +
+        "the pair may not be initialized on this program",
+    );
+  }
+  if (found.length > 1) {
+    throw new Error(
+      `ambiguous pair: engines exist for both base/quote orders ` +
+        `(${candidates.map((key) => key.toBase58()).join(" / ")}); pass options.pair explicitly`,
+    );
+  }
   if (!configInfo || configInfo.data.length <= CONFIG_PAUSED_OFFSET) {
     throw new Error(`pAMM config account missing: ${accounts.pammConfig.toBase58()}`);
   }
   if (configInfo.data[CONFIG_PAUSED_OFFSET] !== 0) pammFail("Paused");
-  if (!engineInfo) {
-    throw new Error(`engine account not found: ${resolvedEngine.engine.toBase58()}`);
-  }
-  const engine = decodeEngineAccount(engineInfo.data);
+
+  const engine = decodeEngineAccount(found[0].info.data);
   const quoted = simulateExactIn({
     engine,
     sellerMint: seller,
     buyerMint: buyer,
     grossAmountIn: amount,
-    currentSlot: slot,
+    currentSlot: context.slot,
   });
   return {
     ...quoted,
     validUntilSlot: engine.validUntilSlot,
-    currentSlot: BigInt(slot),
-    engine: resolvedEngine.engine,
+    currentSlot: BigInt(context.slot),
+    engine: found[0].engine,
     buyerSpendableRaw: buyerSpendableRaw(custodyInfo, marketInfo),
   };
 }
