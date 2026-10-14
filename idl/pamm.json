@@ -1,0 +1,1309 @@
+{
+  "address": "7peHVBaaUoTikbuWKn8j2JtNz5dq6AXvQVkaLTgnKVME",
+  "metadata": {
+    "name": "pamm",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Range-CLMM proprietary AMM for CreditVault V2"
+  },
+  "instructions": [
+    {
+      "name": "accept_admin",
+      "discriminator": [
+        112,
+        42,
+        45,
+        90,
+        116,
+        181,
+        13,
+        170
+      ],
+      "accounts": [
+        {
+          "name": "pending_admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initialize",
+      "discriminator": [
+        175,
+        175,
+        109,
+        31,
+        13,
+        152,
+        155,
+        237
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pool_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program",
+          "address": "7peHVBaaUoTikbuWKn8j2JtNz5dq6AXvQVkaLTgnKVME"
+        },
+        {
+          "name": "program_data"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "updater",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "initialize_engine",
+      "discriminator": [
+        17,
+        158,
+        153,
+        215,
+        119,
+        242,
+        156,
+        107
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "base_mint"
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "engine",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  110,
+                  103,
+                  105,
+                  110,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "base_mint"
+              },
+              {
+                "kind": "account",
+                "path": "quote_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "min_base_input_raw",
+          "type": "u64"
+        },
+        {
+          "name": "min_quote_input_raw",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "quote_exact_in",
+      "discriminator": [
+        55,
+        146,
+        194,
+        181,
+        17,
+        72,
+        227,
+        19
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "seller_mint"
+        },
+        {
+          "name": "buyer_mint"
+        },
+        {
+          "name": "engine",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  110,
+                  103,
+                  105,
+                  110,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "engine.base_mint",
+                "account": "Engine"
+              },
+              {
+                "kind": "account",
+                "path": "engine.quote_mint",
+                "account": "Engine"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "gross_amount_in",
+          "type": "u64"
+        }
+      ],
+      "returns": "u64"
+    },
+    {
+      "name": "set_min_base_input_raw",
+      "discriminator": [
+        179,
+        73,
+        78,
+        186,
+        206,
+        129,
+        101,
+        136
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "engine",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  110,
+                  103,
+                  105,
+                  110,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "engine.base_mint",
+                "account": "Engine"
+              },
+              {
+                "kind": "account",
+                "path": "engine.quote_mint",
+                "account": "Engine"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "value",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "set_min_quote_input_raw",
+      "discriminator": [
+        10,
+        18,
+        63,
+        193,
+        251,
+        196,
+        75,
+        74
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "engine",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  110,
+                  103,
+                  105,
+                  110,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "engine.base_mint",
+                "account": "Engine"
+              },
+              {
+                "kind": "account",
+                "path": "engine.quote_mint",
+                "account": "Engine"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "value",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "set_paused",
+      "discriminator": [
+        91,
+        60,
+        125,
+        192,
+        176,
+        225,
+        166,
+        218
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "paused",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "set_updater",
+      "discriminator": [
+        149,
+        229,
+        108,
+        191,
+        0,
+        213,
+        254,
+        210
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "updater",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "swap_exact_in",
+      "discriminator": [
+        104,
+        104,
+        131,
+        86,
+        161,
+        189,
+        180,
+        216
+      ],
+      "accounts": [
+        {
+          "name": "taker",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pool_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "seller_mint"
+        },
+        {
+          "name": "buyer_mint"
+        },
+        {
+          "name": "engine",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  110,
+                  103,
+                  105,
+                  110,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "engine.base_mint",
+                "account": "Engine"
+              },
+              {
+                "kind": "account",
+                "path": "engine.quote_mint",
+                "account": "Engine"
+              }
+            ]
+          }
+        },
+        {
+          "name": "taker_seller_token_account",
+          "writable": true
+        },
+        {
+          "name": "seller_custody",
+          "writable": true
+        },
+        {
+          "name": "buyer_custody",
+          "writable": true
+        },
+        {
+          "name": "destination_token_account",
+          "writable": true
+        },
+        {
+          "name": "vault_config"
+        },
+        {
+          "name": "vault_credit_pool_config"
+        },
+        {
+          "name": "seller_market",
+          "writable": true
+        },
+        {
+          "name": "buyer_market",
+          "writable": true
+        },
+        {
+          "name": "buyer_market_authority"
+        },
+        {
+          "name": "credit_vault_program",
+          "address": "HbKHd4zbjhyiAxGunPfVpvNVVfv8ohN7NfcyfuybND1U"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "gross_amount_in",
+          "type": "u64"
+        },
+        {
+          "name": "min_amount_out",
+          "type": "u64"
+        }
+      ],
+      "returns": "u64"
+    },
+    {
+      "name": "transfer_admin",
+      "discriminator": [
+        42,
+        242,
+        66,
+        106,
+        228,
+        10,
+        111,
+        156
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "new_admin",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "update_market_v2",
+      "discriminator": [
+        175,
+        140,
+        32,
+        70,
+        77,
+        128,
+        103,
+        36
+      ],
+      "accounts": [
+        {
+          "name": "updater",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "engine",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  110,
+                  103,
+                  105,
+                  110,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "engine.base_mint",
+                "account": "Engine"
+              },
+              {
+                "kind": "account",
+                "path": "engine.quote_mint",
+                "account": "Engine"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "reset_tick",
+          "type": "i16"
+        },
+        {
+          "name": "fair_sqrt_price_x96",
+          "type": {
+            "array": [
+              "u8",
+              20
+            ]
+          }
+        },
+        {
+          "name": "base_to_quote_fee_ppm",
+          "type": "u32"
+        },
+        {
+          "name": "quote_to_base_fee_ppm",
+          "type": "u32"
+        },
+        {
+          "name": "valid_until_slot",
+          "type": "u64"
+        },
+        {
+          "name": "apply_slow_update",
+          "type": "bool"
+        },
+        {
+          "name": "new_tick_spacing",
+          "type": "u32"
+        },
+        {
+          "name": "new_ranges",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "RangeInput"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Config",
+      "discriminator": [
+        155,
+        12,
+        170,
+        224,
+        30,
+        250,
+        204,
+        130
+      ]
+    },
+    {
+      "name": "Engine",
+      "discriminator": [
+        246,
+        94,
+        41,
+        147,
+        231,
+        121,
+        110,
+        19
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "AdminTransferStarted",
+      "discriminator": [
+        31,
+        82,
+        117,
+        177,
+        147,
+        168,
+        210,
+        177
+      ]
+    },
+    {
+      "name": "AdminTransferred",
+      "discriminator": [
+        255,
+        147,
+        182,
+        5,
+        199,
+        217,
+        38,
+        179
+      ]
+    },
+    {
+      "name": "MarketUpdated",
+      "discriminator": [
+        170,
+        51,
+        74,
+        147,
+        116,
+        168,
+        217,
+        251
+      ]
+    },
+    {
+      "name": "MinimumInputSet",
+      "discriminator": [
+        5,
+        199,
+        137,
+        205,
+        217,
+        59,
+        199,
+        69
+      ]
+    },
+    {
+      "name": "SwapExecuted",
+      "discriminator": [
+        150,
+        166,
+        26,
+        225,
+        28,
+        89,
+        38,
+        79
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "Unauthorized",
+      "msg": "Unauthorized"
+    },
+    {
+      "code": 6001,
+      "name": "InvalidAccount",
+      "msg": "Invalid account"
+    },
+    {
+      "code": 6002,
+      "name": "ZeroAddress",
+      "msg": "Zero address is not allowed"
+    },
+    {
+      "code": 6003,
+      "name": "Paused",
+      "msg": "Protocol is paused"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidPair",
+      "msg": "Invalid pair"
+    },
+    {
+      "code": 6005,
+      "name": "InvalidRanges",
+      "msg": "Invalid range set"
+    },
+    {
+      "code": 6006,
+      "name": "InvalidTick",
+      "msg": "Invalid tick spacing or tick alignment"
+    },
+    {
+      "code": 6007,
+      "name": "InvalidFee",
+      "msg": "Invalid fee"
+    },
+    {
+      "code": 6008,
+      "name": "InvalidExpiry",
+      "msg": "Invalid price expiry"
+    },
+    {
+      "code": 6009,
+      "name": "PriceExpired",
+      "msg": "Price is expired"
+    },
+    {
+      "code": 6010,
+      "name": "AmountTooSmall",
+      "msg": "Amount is below the configured minimum"
+    },
+    {
+      "code": 6011,
+      "name": "ZeroAmount",
+      "msg": "Amount must be greater than zero"
+    },
+    {
+      "code": 6012,
+      "name": "ZeroAmountOut",
+      "msg": "Swap output is zero"
+    },
+    {
+      "code": 6013,
+      "name": "InsufficientDepth",
+      "msg": "Insufficient curve depth"
+    },
+    {
+      "code": 6014,
+      "name": "SlippageExceeded",
+      "msg": "Minimum output is not satisfied"
+    },
+    {
+      "code": 6015,
+      "name": "MathOverflow",
+      "msg": "Math overflow or unsupported math domain"
+    },
+    {
+      "code": 6016,
+      "name": "UnsupportedTokenProgram",
+      "msg": "Only the legacy SPL Token program is supported"
+    }
+  ],
+  "types": [
+    {
+      "name": "AdminTransferStarted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "current_admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_admin",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AdminTransferred",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "previous_admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "new_admin",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Config",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "updater",
+            "type": "pubkey"
+          },
+          {
+            "name": "pool_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "pool_authority_bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Engine",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "base_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "base_decimals",
+            "type": "u8"
+          },
+          {
+            "name": "quote_decimals",
+            "type": "u8"
+          },
+          {
+            "name": "fair_sqrt_price_x96",
+            "type": {
+              "array": [
+                "u8",
+                20
+              ]
+            }
+          },
+          {
+            "name": "base_to_quote_fee_ppm",
+            "type": "u32"
+          },
+          {
+            "name": "quote_to_base_fee_ppm",
+            "type": "u32"
+          },
+          {
+            "name": "valid_until_slot",
+            "type": "u64"
+          },
+          {
+            "name": "cursor_sqrt_ratio_x96",
+            "type": "u128"
+          },
+          {
+            "name": "tick_spacing",
+            "type": "u32"
+          },
+          {
+            "name": "min_base_input_raw",
+            "type": "u64"
+          },
+          {
+            "name": "min_quote_input_raw",
+            "type": "u64"
+          },
+          {
+            "name": "ranges",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "RangeState"
+                }
+              }
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarketUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "engine",
+            "type": "pubkey"
+          },
+          {
+            "name": "reset_tick",
+            "type": "i16"
+          },
+          {
+            "name": "valid_until_slot",
+            "type": "u64"
+          },
+          {
+            "name": "range_count",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MinimumInputSet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "engine",
+            "type": "pubkey"
+          },
+          {
+            "name": "base_side",
+            "type": "bool"
+          },
+          {
+            "name": "value",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RangeInput",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "start_tick",
+            "type": "i32"
+          },
+          {
+            "name": "end_tick",
+            "type": "i32"
+          },
+          {
+            "name": "capacity_base_raw",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RangeState",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "start_tick",
+            "type": "i32"
+          },
+          {
+            "name": "end_tick",
+            "type": "i32"
+          },
+          {
+            "name": "capacity_base_raw",
+            "type": "u64"
+          },
+          {
+            "name": "start_sqrt_ratio_x96",
+            "type": "u128"
+          },
+          {
+            "name": "end_sqrt_ratio_x96",
+            "type": "u128"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SwapExecuted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "engine",
+            "type": "pubkey"
+          },
+          {
+            "name": "taker",
+            "type": "pubkey"
+          },
+          {
+            "name": "seller_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "buyer_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "gross_amount_in",
+            "type": "u64"
+          },
+          {
+            "name": "amount_out",
+            "type": "u64"
+          },
+          {
+            "name": "fee_amount",
+            "type": "u64"
+          },
+          {
+            "name": "end_cursor_sqrt_ratio_x96",
+            "type": "u128"
+          }
+        ]
+      }
+    }
+  ]
+}

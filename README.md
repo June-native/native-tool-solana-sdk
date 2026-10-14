@@ -133,6 +133,23 @@ everything is submitted on-chain directly. The full demo matrix is in
 
 Program ids are overridable via `options.programIds = { pamm, creditVault }`.
 
+## IDLs
+
+The Anchor IDLs for both programs are in [`idl/`](./idl):
+
+| File | Program | Address |
+| --- | --- | --- |
+| [`idl/pamm.json`](./idl/pamm.json) | pAMM | `7peHVBaaUoTikbuWKn8j2JtNz5dq6AXvQVkaLTgnKVME` |
+| [`idl/credit_vault_v2.json`](./idl/credit_vault_v2.json) | CreditVault V2 | `HbKHd4zbjhyiAxGunPfVpvNVVfv8ohN7NfcyfuybND1U` |
+
+`sdk.mjs` does not load them at runtime; discriminators, account order and
+Engine offsets are hardcoded from these files. Use them to generate your own
+client (for example with Anchor) or to decode accounts, events and errors.
+Takers only call `quote_exact_in` and `swap_exact_in` from `pamm.json`; the
+other instructions are admin or updater only. Integrators do not call
+CreditVault V2 directly, but `swap_exact_in` passes its accounts through and
+its errors (for example `InsufficientLiquidity`, 6014) surface in swap logs.
+
 ## How requests are packaged
 
 - `quote_exact_in`: 8-byte Anchor discriminator + `u64 gross_amount_in`

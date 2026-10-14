@@ -6,7 +6,8 @@
   "main": "sdk.mjs",
   "exports": "./sdk.mjs",
   "files": [
-    "sdk.mjs"
+    "sdk.mjs",
+    "idl"
   ],
   "scripts": {
     "quote": "node example.mjs quote",

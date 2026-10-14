@@ -1,13 +1,36 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { Keypair } from "@solana/web3.js";
 import {
+  DEFAULT_CREDIT_VAULT_PROGRAM_ID,
+  DEFAULT_PAMM_PROGRAM_ID,
   ENGINE_ACCOUNT_DISCRIMINATOR,
   ENGINE_ACCOUNT_SIZE,
   decodeEngineAccount,
   simulateExactIn,
   sqrtRatioAtTick,
 } from "./sdk.mjs";
+
+const readIdl = (name) =>
+  JSON.parse(readFileSync(new URL(`./idl/${name}.json`, import.meta.url), "utf8"));
+
+test("bundled IDLs match the program ids and Engine discriminator in sdk.mjs", () => {
+  const pamm = readIdl("pamm");
+  const creditVault = readIdl("credit_vault_v2");
+  assert.equal(pamm.address, DEFAULT_PAMM_PROGRAM_ID.toBase58());
+  assert.equal(creditVault.address, DEFAULT_CREDIT_VAULT_PROGRAM_ID.toBase58());
+  assert.deepEqual(
+    pamm.accounts.find((account) => account.name === "Engine").discriminator,
+    [...ENGINE_ACCOUNT_DISCRIMINATOR],
+  );
+  const swap = pamm.instructions.find((ix) => ix.name === "swap_exact_in");
+  const quote = pamm.instructions.find((ix) => ix.name === "quote_exact_in");
+  assert.deepEqual(swap.discriminator, [104, 104, 131, 86, 161, 189, 180, 216]);
+  assert.equal(swap.accounts.length, 17);
+  assert.deepEqual(quote.discriminator, [55, 146, 194, 181, 17, 72, 227, 19]);
+  assert.equal(quote.accounts.length, 4);
+});
 
 function writeU128LE(buffer, offset, value) {
   buffer.writeBigUInt64LE(value & ((1n << 64n) - 1n), offset);
